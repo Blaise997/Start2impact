@@ -1,0 +1,267 @@
+CREATE TABLE global_data (
+    Country VARCHAR(100),
+    `Gross tertiary education enrollment(%)` DECIMAL(10,2),
+    `Out of pocket health expenditure(%)` DECIMAL(10,2),
+    `Unemployment rate(%)` DECIMAL(10,2),
+    GDP BIGINT,
+    population BIGINT,
+  	`Physicians per thousand` DECIMAL (4,2)
+);
+
+
+LOAD DATA INFILE 'C:/Work/Lavoro/Start2impact/Progetto SQL/world-data-2023.csv'
+INTO TABLE global_data
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'
+IGNORE 1 ROWS
+(@col1,@col2,@col3,@col4,@col5,@col6,@col7,@col8,@col9,@col10,@col11,
+ @col12,@col13, @col14, @col15, @col16, @col17, @col18, @col19,
+ @col20, @col21, @col22, @col23, @col24, @col25, @col26, @col27, @col28,
+ @col29, @col30, @col31, @col32)
+SET 
+    Country = @col1,
+    `Gross tertiary education enrollment(%)` = @col19,
+    `Out of pocket health expenditure(%)` = @col26,
+    `Unemployment rate(%)` = @col32,
+    GDP = REPLACE(REPLACE(@col17, '$', ''), ',', ''),
+    population = REPLACE(@col28, ',', ''),
+    `Physicians per thousand` = @col27
+    ;
+    
+
+CREATE TABLE sustainable_energy(
+  Country VARCHAR(100),
+  Year INT,
+  `Renewable energy share(%)` DECIMAL(10,2),
+  `GDP per capita` DECIMAL (14,8), 
+  `Access to electricity(%)` DECIMAL (14,8),
+  `Renewable-electricity-generating-capacity-per-capita (Wpc)` DECIMAL (14,8),
+  `Electricity from renewables (TWh)` DECIMAL (10,2)
+ );
+
+LOAD DATA INFILE 'C:/Work/Lavoro/Start2impact/Progetto SQL/global-data-on-sustainable-energy (1).csv'
+INTO TABLE sustainable_energy
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'
+IGNORE 1 LINES
+(@col1, @col2, @col3, @col4, @col5, @col6, @col7, @col8, @col9, @col10, @col11,
+@col12, @col13, @col14, @col15, @col16, @col17)
+SET
+	Country = @col1,
+  Year = @col2,
+  `Access to electricity(%)` = @col3,
+  `Renewable-electricity-generating-capacity-per-capita (Wpc)` = @col5,
+  `Renewable energy share(%)` = @col7,
+  `Electricity from renewables (TWh)` = @col10,
+  `GDP per capita` = @col17;
+
+
+-- Step 2: Add a new column named ID with AUTO_INCREMENT attribute
+ALTER TABLE sustainable_energy
+ADD COLUMN ID INT AUTO_INCREMENT PRIMARY KEY FIRST;
+
+
+
+/* 1st task: ordina i Paesi per percentuale di energia rinnovabile prodotta nell'ultimo anno disponibile*/
+
+SELECT 
+    se1.Country, 
+    se1.`Renewable energy share(%)`, 
+    se1.Year,
+    se1.`Access to electricity(%)`
+FROM 
+    sustainable_energy se1
+WHERE 
+    se1.Year = (
+        SELECT 
+            MAX(se2.Year)
+        FROM 
+            sustainable_energy se2
+        WHERE 
+            se2.`Renewable energy share(%)` > 0.00 AND se1.Country = se2.Country
+    )
+ORDER BY 
+    se1.`Renewable energy share(%)` DESC;
+
+
+/* Ho scelto di creare una query di questo tipo per una serie di ragioni: precedentemente, 
+avevo cercato solo quali fossero i Paesi con la percentuale più alta di energia rinnovabile al mondo
+Il risultato è stato sorprendente, in quanto in top 10 ci sono solo Paesi del continente africano
+A questo punto ho deciso di rendere questa query un po' più complessa, cercando anche quale percentuale
+di accesso all'elettricità ci fosse in questi Paesi. Questa percentuale è molto bassa, va dall'11% del Burundi 
+al 48% dell'Etiopia. In controtendenza il Gabon, che è 4^ per percentuale di rinnovabili, ma con un
+accesso all'elettricità del 91% circa. */
+
+/* 2nd task: cerchiamo i Paesi che hanno prodotto più energia rinnovabile nell'ultimo anno a referto */
+
+/* Selezioniamo le colonne che vogliamo visualizzare nel risultato finale*/
+
+SELECT 
+    se1.Country, 
+    se1.`Electricity from renewables (TWh)`, 
+    se1.Year
+-- Definiamo la tabella da cui stiamo estraendo i dati
+FROM 
+    sustainable_energy se1
+-- Applichiamo una condizione per filtrare i dati
+WHERE 
+    se1.Year = (
+        -- Questa è una subquery correlata che restituisce l'anno più recente per ciascun paese
+        SELECT 
+            MAX(se2.Year)
+        FROM 
+            sustainable_energy se2
+        WHERE 
+            -- Ci assicuriamo che stiamo considerando lo stesso paese sia nella tabella esterna che nella subquery
+            se1.Country = se2.Country
+    )
+-- Ordiniamo i risultati in base alla percentuale di elettricità da fonti rinnovabili
+ORDER BY 
+    se1.`Electricity from renewables (TWh)` DESC;
+
+/*Da questa query la Cina emerge come campione indiscusso delle rinnovabili, con una produzione di 2184.94
+TWh, seguita a lunga distanza dagli Stati Uniti con 821.40; segue il Brasile con 520.01, il Canada con 429.24,
+l'India con 315.76, la Germania con 251.48, il Giappone con 205.60, la Norvegia con 152.09, il Regno Unito con 131.74
+e la Turchia con 128.34. P.S. Francia e Italia sono subito dopo all'undicesimo e dodicesimo posto :) */
+
+-- Creiamo un alias 'start' per i dati all'inizio del periodo di rilevamento
+WITH start AS (
+    SELECT 
+        s.Country, 
+        s.`Electricity from renewables (TWh)` AS start_value, 
+        s.Year as start_year
+    FROM 
+        sustainable_energy s
+    INNER JOIN (
+        SELECT Country, MIN(Year) as MinYear
+        FROM sustainable_energy
+        GROUP BY Country
+    ) sm ON s.Country = sm.Country AND s.Year = sm.MinYear
+),
+
+-- 3rd task: cerchiamo i paesi con il maggior aumento percentuale nella produzione di energia da rinnovabili
+
+-- Creiamo un alias 'end' per i dati alla fine del periodo di rilevamento
+end AS (
+    SELECT 
+        e.Country, 
+        e.`Electricity from renewables (TWh)` AS end_value, 
+        e.Year as end_year
+    FROM 
+        sustainable_energy e
+    INNER JOIN (
+        SELECT Country, MAX(Year) as MaxYear
+        FROM sustainable_energy
+        GROUP BY Country
+    ) em ON e.Country = em.Country AND e.Year = em.MaxYear
+)
+
+-- Calcoliamo la differenza percentuale tra i valori di inizio e fine per tutti i paesi
+SELECT 
+    start.Country, 
+    ((end.end_value - start.start_value) / start.start_value * 100) AS percentage_increase, 
+    start.start_year, 
+    end.end_year
+FROM 
+    start
+JOIN 
+    end ON start.Country = end.Country
+ORDER BY 
+    percentage_increase DESC;
+
+
+/*Con questa query, ho selezionato i Paesi che hanno registrato il maggior aumento percentuale di energia
+prodotta da fonti rinnovabili nell'arco di tempo 2000-2020. In top 10 abbiamo l'Estonia, poi Israele, la 
+Cambogia, la Giordania, Guinea Equatoriale, Bielorussia, Cuba, Ungheria, Belgio e Senegal. Va detto che la
+maggior parte di questi paesi partivano da valori rasenti lo 0 (Estonia a 0.1, Ungheria 0.24, la Bielorussia 0.03). */
+
+/* Adesso cambiamo focus: ci spostiamo sulla tabella global_data per delle query su sanità ed educazione. */
+
+/*La prima query cercherà i dieci Paesi con la miglior sanità pubblica al mondo, intesa come minor 'Out of pocket expenditure'. 
+Ci tengo a precisare che la valutazione di un Sistema Sanitario in questi termini è molto approssimativa, in quanto la 
+spesa sanitaria (pubblica o privata che sia) non dipende solo dall'efficienza del Sistema Sanitario, ma anche
+dall'età media della popolazione. */
+
+SELECT 
+    Country, 
+    `Out of pocket health expenditure(%)`
+FROM 
+    global_data
+WHERE
+    `Out of pocket health expenditure(%)` > 0  -- Exclude rows where the value is 0
+ORDER BY 
+    `Out of pocket health expenditure(%)` ASC
+LIMIT 10;
+
+/* Da questa classifica risulta che i 10 paesi migliori in termini di sanità pubblica (intesa come 
+minor 'Out of pocket expensiture' sono il Kiribati con 0.20%, Tuvalu con lo 0.70%, le Seychelles con 2.50%,
+gli Stati Federati della Micronesia non 2.50%, le isole Salomone, il Botsana con 5.30%, il Brunei con il 6%,
+il Principato di Monaco con il 6.10% e il Qatar con 6.20% */
+
+/* Adesso cerchiamo di creare un'altra query, che risulti comunque nell'elenco dei primi 10 Paesi al mondo per sanità,
+questa volta intesa come maggior numero di medici in rapporto alla popolazione */
+
+SELECT 
+    Country,
+    `Physicians per thousand`
+FROM 
+    global_data
+ORDER BY 
+    `Physicians per thousand` DESC
+LIMIT 10;
+
+/* Da questa query abbiamo invece che i Paesi in top 10 sono: Cuba, la Georgia, il Principato di Monaco, la Lituania,
+San Marino, la Grecia, la Bielorussia, l'Austria, il Portogallo e l'Uruguay. */
+
+/* Adesso ci spostiamo nel campo educazione: voglio ottenere la lista dei primi 10 Paesi nel mondo per partecipazione della popolazione
+all'educazione terziaria (intesa come università, scuole professionali e college) */
+
+SELECT 
+    Country,
+    `Gross tertiary education enrollment(%)`
+FROM 
+    global_data
+ORDER BY 
+    `Gross tertiary education enrollment(%)` DESC
+LIMIT 10;
+
+/* I risultati di questa query possono confondere: nelle prime tre posizioni abbiamo Grecia (136.60%), Australia (113.10%) e Grenada (104.60%). 
+Ma come è possibile che alcune percentuali siano maggiori di 100%? Il termine "gross" include studenti di tutte le età e, citando testualmente dalla
+Banca Mondiale, include studenti la cui età eccede il campione ufficiale (quindi include sia i ripetenti, che coloro che accedono prima
+dell'età all'educazione terziaria, o coloro che accedono in tarda età. Sarebbe più corretto utilizzare il 'Net tertiary education enrollment(%)'. */
+
+/*Adesso, verifichiamo se c'è correlazione tra partecipazione all'educazione terziaria e PIL pro capite (che possiamo ottenere dalla tabella sull'energia sostenibile) 
+e minor tasso di disoccupazione. */
+
+
+SELECT 
+    global_data.Country,
+    global_data.`Gross tertiary education enrollment(%)`,
+    se.`GDP per capita`,
+    global_data.`Unemployment rate(%)`,
+    RANK() OVER (ORDER BY se.`GDP per capita` DESC) AS GDP_Rank,
+    RANK() OVER (ORDER BY global_data.`Unemployment rate(%)` ASC) AS Unemployment_Rank
+FROM 
+    global_data
+JOIN 
+    (SELECT 
+         Country,
+         `GDP per capita`
+     FROM 
+         sustainable_energy
+     WHERE 
+         Year = (SELECT MAX(Year) FROM sustainable_energy)
+    ) AS se ON global_data.Country = se.Country
+WHERE
+    global_data.`Unemployment rate(%)` > 0
+ORDER BY 
+    global_data.`Gross tertiary education enrollment(%)` DESC
+LIMIT 10;
+
+/* Ho costruito questa query in modo tale da estrarre i primi 10 Paesi per partecipazione all'educazione terziaria e, per quei Paesi,
+estrarre i valori del PIL pro capite (con un JOIN dalla tabella sustainable_energy), e il tasso di disoccupazione. Inoltre, con la 
+funzione RANK ho calcolato la posizione di ogni Paese in termini di PIL pro capite e disoccupazione. Da questa classifica si evince che non
+c'è una stretta correlazione tra partecipazione all'educazione terziaria e minor disoccupazione, come neppure tra partecipazione all'educazione terziaria 
+e PIL pro capite.*/
